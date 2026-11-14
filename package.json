@@ -1,0 +1,44 @@
+{
+  "name": "short-video-cli",
+  "version": "1.0.0",
+  "description": "多平台短视频/媒体下载 CLI —— 基于 galaxy-downloader-client 的 yt-dlp 引擎（源码级 submodule），支持下载/解析/字幕/转录/历史记录",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "svdl": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "setup": "bash scripts/setup.sh"
+  },
+  "keywords": [
+    "download",
+    "video",
+    "audio",
+    "bilibili",
+    "douyin",
+    "tiktok",
+    "instagram",
+    "xiaohongshu",
+    "yt-dlp"
+  ],
+  "author": "short_video_cli",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.9.0",
+    "commander": "^12.1.0"
+  },
+  "optionalDependencies": {
+    "puppeteer-core": "^22.15.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.19.39",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

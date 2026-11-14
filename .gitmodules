@@ -1,0 +1,3 @@
+[submodule "external/galaxy-downloader-client"]
+	path = external/galaxy-downloader-client
+	url = https://github.com/bhwa233/galaxy-downloader-client.git
