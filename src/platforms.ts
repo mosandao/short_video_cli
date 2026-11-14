@@ -36,7 +36,17 @@ export function normalizePlatform(platform?: string | null): CanonicalPlatform {
         return 'unknown'
     }
 
-    return PLATFORM_ALIASES[platform.trim().toLowerCase()] ?? 'unknown'
+    const key = platform.trim().toLowerCase()
+    if (PLATFORM_ALIASES[key]) {
+        return PLATFORM_ALIASES[key]
+    }
+    // 模糊兜底：BilibiliSpaceVideo / DouyinIE 等 extractor 复合名
+    for (const [alias, canonical] of Object.entries(PLATFORM_ALIASES)) {
+        if (alias !== 'unknown' && alias !== 'x' && key.includes(alias)) {
+            return canonical
+        }
+    }
+    return 'unknown'
 }
 
 export function supportsAudioExtraction(platform: string | null | undefined): boolean {

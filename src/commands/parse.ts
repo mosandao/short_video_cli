@@ -7,6 +7,7 @@ import type { YtDlpFormat, YtDlpInfo } from '../engine/types.js'
 import { formatDuration } from '../utils/format.js'
 import { normalizePlatform } from '../platforms.js'
 import { isDouyinUrl, isDouyinProfileUrl, resolveDouyinShareLink } from '../douyin.js'
+import { formatTimePoint } from '../timeRange.js'
 import { parseDouyinUserHomepageWithBrowser, parseDouyinVideoWithBrowser } from '../browser.js'
 import { ensureBrowserModeInstance, withHeadlessFallback } from './browserDownload.js'
 
@@ -78,9 +79,11 @@ async function parseDouyinWithBrowser(options: ParseOptions): Promise<ParseResul
             console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
             console.log(`类型: 抖音用户主页，共 ${pages.length} 个视频`)
             console.log(`主页: ${url}`)
-            pages.slice(0, 30).forEach(p => console.log(`  [${p.page}] ${p.part}`))
+            pages.slice(0, 30).forEach(p => console.log(
+                `  [${p.page}] ${p.createTime ? formatTimePoint(p.createTime) : '????-??-??'}  ${p.part}`))
             if (pages.length > 30) console.log(`  ... 还有 ${pages.length - 30} 项`)
-            console.log('\n提示: 下载用 --items 1,3-5 / --part N / --all，建议 --folder 按作者分目录')
+            console.log('\n提示: 下载用 --items 1,3-5 / --part N / --all，或 --since/--until 按发布时间筛选')
+            console.log('      （如 --since "yesterday" --until "today 09:00"）')
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
         }
         return {

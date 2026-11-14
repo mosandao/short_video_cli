@@ -32,6 +32,8 @@ export interface PageInfo {
     duration: number
     downloadVideoUrl: string | null
     downloadAudioUrl: string | null
+    /** 发布时间（Unix 秒，抖音主页拦截 /aweme/post 的 create_time） */
+    createTime?: number
 }
 
 /**

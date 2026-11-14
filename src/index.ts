@@ -36,6 +36,8 @@ program
     .option('--all', '下载列表全部条目')
     .option('-p, --part <num>', '单个分P/条目序号（--items N 的简写）')
     .option('--quality <quality>', '画质: lowest, highest, ask (默认: ask；音频模式自动最低)', 'ask')
+    .option('--since <time>', '发布时间范围起点: 2026-11-13[ 09:00] / yesterday[ 09:00] / today / 7d')
+    .option('--until <time>', '发布时间范围终点（同上，默认当前时刻）')
     .option('--format <format>', 'yt-dlp 格式选择器或 format_id（优先于 --quality）')
     .option('--save-cover', '同时保存封面图')
     .option('--browser', '浏览器模式（抖音用户主页/反爬兜底）')
@@ -59,10 +61,14 @@ program
             quality: options.quality as 'lowest' | 'highest' | 'ask',
             format: options.format,
             saveCover: options.saveCover,
+            since: options.since,
+            until: options.until,
         })
 
         if (options.json) {
             console.log(JSON.stringify(result, null, 2))
+        } else if (!result.success && result.error) {
+            console.error(`\n[错误] ${result.error}\n`)
         }
         process.exit(result.success ? 0 : 1)
     })

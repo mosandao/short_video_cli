@@ -70,6 +70,8 @@ node dist/index.js status              # 环境自检
 | `--folder <name>` | 子目录（按用户/系列隔离，**强烈建议**） | - |
 | `-i, --items` | 列表条目选择 `"1,3-5"` | - |
 | `-p, --part <N>` | 单个条目序号 | - |
+| `--since <time>` | 发布时间范围起点（时间范围即选择器，免 --items） | - |
+| `--until <time>` | 发布时间范围终点（默认当前时刻） | - |
 | `--all` | 列表全部下载 | - |
 | `--quality` | lowest / highest / ask | ask（非交互环境=highest） |
 | `--format <id>` | 直接指定 yt-dlp 格式（parse 结果里的 format_id） | - |
@@ -147,10 +149,16 @@ transcripts/用户名/视频标题.txt
 抖音链接（视频 `douyin.com/video/...`、主页 `douyin.com/user/...`、分享短链 `v.douyin.com/...`）**自动路由到浏览器模式**——引擎的抖音 extractor 未实现签名（上游限制），CLI 已内置路由，直接用即可：
 
 ```bash
-node dist/index.js parse "<url>"              # 单视频：标题+已捕获流；主页：全部视频列表
+node dist/index.js parse "<url>"              # 单视频：标题+已捕获流；主页：全部视频列表（含发布时间）
 node dist/index.js "<video-url>" --folder X   # 单视频下载
 node dist/index.js "<user-url>" --items 1-10 --folder "作者"   # 主页批量
+# 按发布时间范围批量下载（抖音/B站空间通用）
+node dist/index.js "<user-url>" --since "yesterday" --until "today 09:00" --folder "作者"
+node dist/index.js "<user-url>" --since "7d" --folder "作者"          # 最近 7 天
+node dist/index.js "<space-url>" --since "2026-11-01" --until "2026-11-13 23:59" --folder "作者"
 ```
+
+**时间格式**：`YYYY-MM-DD`、`YYYY-MM-DD HH:mm`、`yesterday [HH:mm]`、`today [HH:mm]`、`Nd`（N 天前 00:00）、`3天前`；`--until` 缺省为当前时刻。B站空间含失效视频时自动逐条取日期（跳过死链，稍慢）；引擎侧单次最多扫描 100 条。
 
 - **登录后默认无头运行**（实测登录态无头对抖音完全可用，无窗口打扰）；无头未成功时自动切可见窗口重试；`svdl login` 时才弹可见窗口
 - **推荐先 `svdl login douyin.com`**：登录后画质档更全（实测多出 1080p）、主页枚举更稳、无头可用

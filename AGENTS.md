@@ -21,6 +21,7 @@ svdl "<url>"                          # 下载（视频/音频/主页，自动�
 svdl parse "<url>"                    # 只解析：条目列表 + 画质格式表
 svdl captions "<url>" -l zh           # 只下载字幕
 svdl "<url>" --items 1,3-5            # 列表选择条目（--part N / --all）
+svdl "<url>" --since "yesterday" --until "today 09:00" --folder X  # 按发布时间范围批量（抖音/B站通用）
 svdl "<url>" --type audio --folder X  # 音频(m4a)，按系列分目录
 svdl login douyin.com                 # 打开专属浏览器登录一次（长期有效）
 svdl "<douyin-url>"                   # 抖音自动走浏览器模式（视频/主页/短链）

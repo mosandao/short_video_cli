@@ -13,6 +13,7 @@ import { ensureLoginBrowser, loginBrowserAlive, loginBrowserUrl, profileExists }
 import { isDouyinProfileUrl } from '../douyin.js'
 import { isLoggedInto, waitForLogin } from '../cookies.js'
 import { isAnonMode } from '../engine/driver.js'
+import { parseTimeRange, formatTimePoint, type TimeRange } from '../timeRange.js'
 import type { MediaInfo, PageInfo } from '../types.js'
 import { downloadFile } from '../utils/download.js'
 import { formatBytes, sanitizeFilename } from '../utils/format.js'
@@ -138,6 +139,14 @@ async function downloadParsedVideo(
     return { path: videoResult.path, size: videoResult.size, type: 'video', dbId, title: baseName }
 }
 
+/** 打印主页条目清单（带发布时间，有则显示） */
+function printPageList(pages: PageInfo[]): void {
+    console.log('\n[提示] 可用条目:')
+    pages.slice(0, 30).forEach(p =>
+        console.log(`  [${p.page}] ${p.createTime ? formatTimePoint(p.createTime) : '????-??-??'}  ${p.part}`))
+    if (pages.length > 30) console.log(`  ... 还有 ${pages.length - 30} 项`)
+}
+
 /** 解析条目选择（--items "1,3-5" / --part N / --all） */
 function selectPages(pages: PageInfo[], options: DownloadOptions): PageInfo[] {
     if (options.part && options.part > 0) {
@@ -261,23 +270,50 @@ export async function browserDownloadCommand(options: DownloadOptions): Promise<
                 return { success: false, files: [], error: homepage.error || '主页解析失败' }
             }
             const pages = homepage.data.pages || []
-            console.log(`\n[列表] 共 ${pages.length} 个视频`)
+            const dated = pages.filter(p => p.createTime !== undefined)
+            console.log(`\n[列表] 共 ${pages.length} 个视频${dated.length ? '' : '（⚠️ 未捕获发布时间，无法用时间范围过滤）'}`)
+
+            // 时间范围（--since/--until）→ 直接作为条目选择器
+            let range: TimeRange | null = null
+            if (options.since || options.until) {
+                const r = parseTimeRange(options.since, options.until)
+                if ('error' in r) {
+                    return { success: false, files: [], error: r.error }
+                }
+                range = r
+            }
 
             let selected: PageInfo[]
-            try {
-                selected = selectPages(pages, options)
-            } catch (e) {
-                console.log('\n[提示] 可用条目:')
-                pages.slice(0, 30).forEach(p => console.log(`  [${p.page}] ${p.part}`))
-                if (pages.length > 30) console.log(`  ... 还有 ${pages.length - 30} 项`)
-                return { success: false, files: [], error: e instanceof Error ? e.message : String(e) }
-            }
-            if (selected.length === 0) {
-                console.log('\n[提示] 可用条目:')
-                pages.slice(0, 30).forEach(p => console.log(`  [${p.page}] ${p.part}`))
-                if (pages.length > 30) console.log(`  ... 还有 ${pages.length - 30} 项`)
-                console.log('\n[提示] 指定 --items 1,3-5 或 --part <N> 选择，--all 下载全部')
-                return { success: false, files: [], error: `共 ${pages.length} 个视频，需指定 --items / --part / --all` }
+            if (range) {
+                if (dated.length === 0) {
+                    return { success: false, files: [], error: '本轮未捕获到发布时间，无法按时间范围过滤（重试或用 --items）' }
+                }
+                selected = dated.filter(p =>
+                    (p.createTime as number) >= range.sinceTs && (p.createTime as number) <= range.untilTs)
+                console.log(`[时间] ${formatTimePoint(range.sinceTs)} ~ ${formatTimePoint(range.untilTs)} 命中 ${selected.length}/${pages.length}`)
+                selected.slice(0, 30).forEach(p =>
+                    console.log(`  [${p.page}] ${formatTimePoint(p.createTime as number)}  ${p.part}`))
+                if (selected.length > 30) console.log(`  ... 还有 ${selected.length - 30} 条`)
+                if (selected.length === 0) {
+                    const times = dated.map(p => p.createTime as number)
+                    return {
+                        success: false,
+                        files: [],
+                        error: `指定时间范围内没有视频（主页时间跨度 ${formatTimePoint(Math.min(...times))} ~ ${formatTimePoint(Math.max(...times))}）`,
+                    }
+                }
+            } else {
+                try {
+                    selected = selectPages(pages, options)
+                } catch (e) {
+                    printPageList(pages)
+                    return { success: false, files: [], error: e instanceof Error ? e.message : String(e) }
+                }
+                if (selected.length === 0) {
+                    printPageList(pages)
+                    console.log('\n[提示] 指定 --items 1,3-5 或 --part <N> 选择，--all 全部，--since/--until 按发布时间筛选')
+                    return { success: false, files: [], error: `共 ${pages.length} 个视频，需指定 --items / --part / --all / 时间范围` }
+                }
             }
 
             const username = (homepage.data.desc || '').replace(/共 \d+ 个视频/, '').trim()

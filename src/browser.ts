@@ -214,6 +214,7 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
         // 用于直接从 API 响应收集视频 ID 和描述
         const collectedVideoIds: Set<string> = new Set()
         const videoDescMap: Map<string, string> = new Map()
+        const videoTimeMap: Map<string, number> = new Map()
 
         page.on('response', async (response: any) => {
             const url = response.url()
@@ -225,12 +226,13 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
                     if (data?.aweme_list) {
                         console.log(`[浏览器] 响应包含 ${data.aweme_list.length} 个视频`)
 
-                        // 直接从 API 响应收集视频 ID 和描述（统一转字符串避免类型不匹配）
+                        // 直接从 API 响应收集视频 ID、描述和发布时间（统一转字符串避免类型不匹配）
                         for (const item of data.aweme_list) {
                             if (item.aweme_id) {
                                 const id = String(item.aweme_id)
                                 collectedVideoIds.add(id)
                                 if (item.desc) videoDescMap.set(id, item.desc)
+                                if (item.create_time) videoTimeMap.set(id, Number(item.create_time))
                             }
                         }
                         console.log(`[浏览器] 已收集 ${collectedVideoIds.size} 个视频 ID`)
@@ -330,6 +332,7 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
                     duration: 0,
                     downloadVideoUrl: `https://www.douyin.com/video/${id}`,
                     downloadAudioUrl: null,
+                    ...(videoTimeMap.has(id) ? { createTime: videoTimeMap.get(id) } : {}),
                 })),
             },
         }

@@ -9,11 +9,12 @@ import { existsSync } from 'fs'
 import { statSync } from 'fs'
 import { basename } from 'path'
 import { createInterface } from 'readline'
-import { downloadMedia, extractInfoResolved, makeProgressPrinter } from '../engine/driver.js'
+import { downloadMedia, extractInfo, extractInfoResolved, makeProgressPrinter } from '../engine/driver.js'
 import type { YtDlpInfo } from '../engine/types.js'
 import { insertRecord, queryByVideoUrl } from '../db.js'
 import { formatBytes, formatDuration } from '../utils/format.js'
 import { isDouyinUrl, resolveDouyinShareLink } from '../douyin.js'
+import { parseTimeRange, formatTimePoint, type TimeRange } from '../timeRange.js'
 import { browserDownloadCommand } from './browserDownload.js'
 
 export interface DownloadOptions {
@@ -34,6 +35,10 @@ export interface DownloadOptions {
     format?: string
     /** 同时保存封面 */
     saveCover?: boolean
+    /** 时间范围起点（YYYY-MM-DD [HH:mm] / yesterday [HH:mm] / today [HH:mm] / Nd） */
+    since?: string
+    /** 时间范围终点（同上，默认当前时刻） */
+    until?: string
 }
 
 export interface DownloadResult {
@@ -52,6 +57,19 @@ export interface DownloadResult {
 /** yt-dlp 格式选择器映射 */
 function qualityToFormat(quality: 'lowest' | 'highest'): string {
     return quality === 'lowest' ? 'wv*+wa/w' : 'bv*+ba/b'
+}
+
+/** 条目发布时间（Unix 秒）：优先 timestamp，回退 upload_date(YYYYMMDD)；多P 嵌套取内层 */
+function entryTimestamp(e: YtDlpInfo): number | null {
+    if (typeof e.timestamp === 'number' && e.timestamp > 0) return e.timestamp
+    const d = e.upload_date
+    if (typeof d === 'string' && /^\d{8}$/.test(d)) {
+        return Math.floor(new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)).getTime() / 1000)
+    }
+    // 空间条目可能是嵌套 playlist（多P 合集），日期在内层第一条
+    const inner = (e.entries as YtDlpInfo[] | undefined)?.[0]
+    if (inner) return entryTimestamp(inner)
+    return null
 }
 
 async function resolveQuality(options: DownloadOptions): Promise<'lowest' | 'highest'> {
@@ -167,18 +185,89 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
         const audioOnly = type === 'audio'
         const quality = await resolveQuality(options)
 
+        // 时间范围（--since/--until）
+        let range: TimeRange | null = null
+        if (options.since || options.until) {
+            const r = parseTimeRange(options.since, options.until)
+            if ('error' in r) {
+                return { success: false, files: [], error: r.error }
+            }
+            range = r
+        }
+
         // 第一步：解析（flat 枚举列表；条目缺元数据时自动补非 flat）
         if (!options.json) console.log('[解析] 引擎解析中...')
         const info = await extractInfoResolved(url)
 
-        const entries = (info.entries || []).filter(Boolean)
+        let entries = (info.entries || []).filter(Boolean)
         const isPlaylist = info._type === 'playlist' || entries.length > 1
 
-        // 列表安全选择：多项且未指定 --items/--all → 拒绝整包下载
+        // 时间范围需要每条的发布时间 → 非 flat 全量提取（引擎单次上限 100 条，主页/空间通常最新在前）
+        if (range && isPlaylist && entries.some(e => entryTimestamp(e) === null)) {
+            if (!options.json) console.log('[时间] 获取条目发布时间（非 flat 提取，条目多时较慢）...')
+            try {
+                const full = await extractInfo(url, { flat: false })
+                const fullEntries = (full.entries || []).filter(Boolean)
+                if (fullEntries.length) entries = fullEntries
+            } catch {
+                // 整表提取被失效视频等中止 → 保留 flat，走下面的逐条提取
+            }
+            // 逐条兜底：失效视频只影响自己，不影响整表（慢但稳）
+            if (entries.some(e => entryTimestamp(e) === null)) {
+                if (!options.json) console.log('[时间] 部分条目无日期，逐条提取（跳过失效视频）...')
+                for (let i = 0; i < entries.length; i++) {
+                    if (entryTimestamp(entries[i]) !== null) continue
+                    const entryUrl = (entries[i].url || entries[i].webpage_url) as string | undefined
+                    if (!entryUrl) continue
+                    try {
+                        const one = await extractInfo(entryUrl, { flat: false })
+                        const ts = entryTimestamp(one)
+                        if (ts !== null) (entries[i] as any).timestamp = ts
+                    } catch {
+                        // 失效视频，跳过
+                    }
+                }
+            }
+        }
+
+        // 单视频 + 时间范围 → 范围外直接跳过
+        if (range && !isPlaylist) {
+            const ts = entryTimestamp(info)
+            if (ts !== null && (ts < range.sinceTs || ts > range.untilTs)) {
+                if (!options.json) {
+                    console.log(`\n[跳过] 发布于 ${formatTimePoint(ts)}，不在指定时间范围内`)
+                }
+                return { success: true, files: [] }
+            }
+        }
+
+        // 列表条目选择：时间范围 > --items > --part > --all > 安全闸
         let entry: string | undefined
         if (isPlaylist) {
             const count = info.playlist_count || entries.length
-            if (options.items) {
+            if (range) {
+                const dated = entries.map((e, i) => ({ i, ts: entryTimestamp(e) }))
+                const hits = dated
+                    .filter(d => d.ts !== null && d.ts >= range.sinceTs && d.ts <= range.untilTs)
+                    .map(d => d.i + 1)
+                if (!options.json) {
+                    console.log(`\n[时间] ${formatTimePoint(range.sinceTs)} ~ ${formatTimePoint(range.untilTs)} 命中 ${hits.length}/${entries.length} 条`)
+                    hits.slice(0, 30).forEach(n => {
+                        const e = entries[n - 1]
+                        const ts = entryTimestamp(e)
+                        console.log(`  [${n}] ${ts ? formatTimePoint(ts) : '????-??-??'}  ${e.title || e.id}`)
+                    })
+                    if (hits.length > 30) console.log(`  ... 还有 ${hits.length - 30} 条`)
+                }
+                if (hits.length === 0) {
+                    const known = dated.filter(d => d.ts !== null).map(d => d.ts as number)
+                    const span = known.length
+                        ? `（已扫描条目的时间跨度 ${formatTimePoint(Math.min(...known))} ~ ${formatTimePoint(Math.max(...known))}，引擎单次最多扫描 100 条）`
+                        : ''
+                    return { success: false, files: [], error: `指定时间范围内没有条目${span}` }
+                }
+                entry = hits.join(',')
+            } else if (options.items) {
                 entry = options.items
             } else if (options.part && options.part > 0) {
                 entry = String(options.part)
@@ -192,12 +281,12 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
                         console.log(`  [${i + 1}] ${dur}  ${e.title || e.id}`)
                     })
                     if (entries.length > 20) console.log(`  ... 还有 ${entries.length - 20} 项`)
-                    console.log(`\n[提示] 指定 --items 1,3-5 或 --part <N> 选择条目，--all 下载全部 ${count} 项`)
+                    console.log(`\n[提示] 指定 --items 1,3-5 / --part <N> / --all，或 --since/--until 按发布时间筛选`)
                 }
                 return {
                     success: false,
                     files: [],
-                    error: `链接包含 ${count} 个条目，需指定 --items / --part / --all`,
+                    error: `链接包含 ${count} 个条目，需指定 --items / --part / --all / 时间范围`,
                 }
             }
         }
@@ -268,13 +357,18 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
                 const entryUrl = entry
                     ? `${canonicalUrl}${canonicalUrl.includes('?') ? '&' : '?'}items=${entry}`
                     : canonicalUrl
+                // 按选择顺序回查条目发布时间（entry 为 "5,12,19" 形式的单索引串）
+                const selectedEntry = entry
+                    ? (entries[parseInt(entry.split(',')[i] ?? '', 10) - 1] ?? null)
+                    : null
+                const entryTs = selectedEntry ? entryTimestamp(selectedEntry) : null
                 dbId = recordToDb({
                     platform,
                     username,
                     title: fileTitle,
                     videoUrl: entryUrl,
                     mediaPath: path,
-                    publishedAt: normalizeUploadDate(info),
+                    publishedAt: entryTs ? formatTimePoint(entryTs).slice(0, 16) : normalizeUploadDate(info),
                     quiet: options.json,
                 })
             }
