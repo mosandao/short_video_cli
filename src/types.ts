@@ -50,6 +50,8 @@ export interface MediaInfo {
     duration?: number
     noteType?: 'video' | 'image' | 'audio'
     downloadVideoUrl?: string | null
+    /** 兜底视频流（主选为 bit_rate 最高档时，可能遇 DASH 无音轨流，回退用） */
+    fallbackVideoUrl?: string | null
     downloadAudioUrl?: string | null
     originDownloadVideoUrl?: string | null
     originDownloadAudioUrl?: string | null

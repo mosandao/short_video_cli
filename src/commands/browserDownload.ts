@@ -95,6 +95,19 @@ function extractAudio(videoPath: string, audioPath: string): { success: boolean;
     }
 }
 
+/** ffprobe 校验文件是否含音轨（bit_rate 最高档可能是 DASH 纯视频流） */
+function hasAudioStream(path: string): boolean {
+    try {
+        const out = execSync(
+            `ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "${path}"`,
+            { encoding: 'utf-8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'] },
+        )
+        return out.trim().length > 0
+    } catch {
+        return true // 探测失败不阻塞，按有音轨处理
+    }
+}
+
 /** 下载单个已解析的抖音视频（CDN 直链） */
 async function downloadParsedVideo(
     data: MediaInfo,
@@ -133,8 +146,25 @@ async function downloadParsedVideo(
         return { path: audioPath, size: audioResult.size, type: 'audio', dbId, title: baseName }
     }
 
-    const videoResult = await downloadWithType(cdnUrl, output, baseName, 'video')
+    let videoResult = await downloadWithType(cdnUrl, output, baseName, 'video')
     if (!videoResult.success) return null
+
+    // 最高档 bit_rate 流可能无音轨（DASH 纯视频）→ 校验后回退到合成流/捕获流
+    if (!hasAudioStream(videoResult.path)) {
+        const fallback = data.fallbackVideoUrl
+        if (fallback) {
+            console.log('  [回退] 最高档流无音轨，改用合成流重新下载')
+            const fallbackResult = await downloadWithType(fallback, output, baseName, 'video')
+            if (fallbackResult.success && hasAudioStream(fallbackResult.path)) {
+                videoResult = fallbackResult
+            } else {
+                console.log('  [警告] 回退流仍无音轨，保留最高画质版本（无声）')
+            }
+        } else {
+            console.log('  [警告] 该流无音轨且无回退源，保留（无声）')
+        }
+    }
+
     const dbId = recordToDb({ username, title: baseName, videoUrl, mediaPath: videoResult.path })
     return { path: videoResult.path, size: videoResult.size, type: 'video', dbId, title: baseName }
 }

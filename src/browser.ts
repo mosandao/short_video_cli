@@ -534,15 +534,31 @@ export async function parseDouyinVideoWithBrowser(videoUrl: string, quality?: 'l
         await page.close()
         await browser.disconnect()
 
-        // 选择最终 URL：最低画质优先用 bit_rate 选出的，否则用捕获的流
-        const finalVideoUrl = (quality === 'lowest' && lowestQualityUrl)
-            ? lowestQualityUrl
-            : capturedVideoUrl
+        // 选择最终 URL：
+        // - lowest：bit_rate 选出的最低档/默认合成流
+        // - highest：detail API 的 bit_rate 最高档直选（确定性拿平台最高画质，
+        //   不依赖播放器实际加载了什么）；DASH 无音轨流由下载方 ffprobe 校验后回退
+        // - 无 bit_rate 数据：用捕获的播放器流
+        let finalVideoUrl: string | null
+        let fallbackVideoUrl: string | null = null
+
+        if (quality === 'lowest' && lowestQualityUrl) {
+            finalVideoUrl = lowestQualityUrl
+        } else if (quality !== 'lowest' && bitRateOptions.length > 0) {
+            const best = [...bitRateOptions].sort((a, b) => b.bit_rate - a.bit_rate)[0]
+            finalVideoUrl = best.url
+            // 回退链：播放器实际加载的流（必有音轨）→ 默认合成流
+            fallbackVideoUrl = capturedVideoUrl || defaultPlayAddr || null
+            console.log(`[浏览器] 最高画质(API直选): ${best.gear_name} (${(best.bit_rate/1000).toFixed(0)}kbps)${fallbackVideoUrl ? '（无音轨时自动回退）' : ''}`)
+        } else {
+            finalVideoUrl = capturedVideoUrl
+        }
 
         if (!finalVideoUrl) {
             // 如果是低画质模式但没拿到 bit_rate，回退到捕获的流
             if (quality === 'lowest' && capturedVideoUrl) {
                 console.log('[浏览器] bit_rate 不可用，回退到捕获的视频流')
+                finalVideoUrl = capturedVideoUrl
             } else {
                 return {
                     success: false,
@@ -563,9 +579,10 @@ export async function parseDouyinVideoWithBrowser(videoUrl: string, quality?: 'l
                 platform: 'douyin',
                 url: videoUrl,
                 duration: 0,
-                downloadVideoUrl: finalVideoUrl || capturedVideoUrl,
+                downloadVideoUrl: finalVideoUrl,
+                fallbackVideoUrl,
                 downloadAudioUrl: null,
-                originDownloadVideoUrl: finalVideoUrl || capturedVideoUrl,
+                originDownloadVideoUrl: finalVideoUrl,
                 originDownloadAudioUrl: null,
                 mediaActions: {
                     video: 'direct-download',
