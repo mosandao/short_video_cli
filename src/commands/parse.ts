@@ -6,7 +6,7 @@ import { extractInfoResolved } from '../engine/driver.js'
 import type { YtDlpFormat, YtDlpInfo } from '../engine/types.js'
 import { formatDuration } from '../utils/format.js'
 import { normalizePlatform } from '../platforms.js'
-import { isDouyinUrl, isDouyinProfileUrl, resolveDouyinShareLink } from '../douyin.js'
+import { isDouyinUrl, isDouyinProfileUrl, resolveDouyinShareLink, cleanDouyinUserUrl } from '../douyin.js'
 import { formatTimePoint } from '../timeRange.js'
 import { parseDouyinUserHomepageWithBrowser, parseDouyinVideoWithBrowser } from '../browser.js'
 import { ensureBrowserModeInstance, withHeadlessFallback } from './browserDownload.js'
@@ -60,9 +60,9 @@ function printFormats(formats: YtDlpFormat[]): void {
 
 /** 抖音链接的浏览器模式解析（单视频画质信息 / 用户主页列表） */
 async function parseDouyinWithBrowser(options: ParseOptions): Promise<ParseResult> {
-    const url = await resolveDouyinShareLink(options.url)
+    const url = cleanDouyinUserUrl(await resolveDouyinShareLink(options.url))
     if (url !== options.url && !options.json) {
-        console.log(`[短链] ${options.url} → ${url}`)
+        console.log(`[规范化] ${options.url} → ${url}`)
     }
 
     const bm = await ensureBrowserModeInstance()

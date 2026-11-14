@@ -35,6 +35,21 @@ export function isDouyinProfileUrl(url: string): boolean {
 }
 
 /**
+ * 主页链接清洗：去掉 ?from_tab_name=main&vid=xxx 之类跳转参数。
+ * vid 会让浏览器打开视频弹层、盖住主页网格，干扰滚动枚举——一律剥掉，
+ * 只保留 sec_uid 路径。（vid 对应的单视频请用 douyin.com/video/<vid> 链接）
+ */
+export function cleanDouyinUserUrl(url: string): string {
+    if (!isDouyinProfileUrl(url)) return url
+    try {
+        const u = new URL(url)
+        return `https://www.douyin.com${u.pathname}`
+    } catch {
+        return url
+    }
+}
+
+/**
  * 解析分享短链得到最终 URL（HEAD 跟随重定向；抖音对 HEAD 不友好时回退 GET）。
  * 失败时原样返回，由浏览器导航时自然完成跳转。
  */
