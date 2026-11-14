@@ -29,8 +29,8 @@ export interface DownloadOptions {
     part?: number
     browser?: boolean
     json?: boolean
-    /** 画质：lowest / highest / ask（默认 ask，非交互环境取 highest） */
-    quality?: 'lowest' | 'highest' | 'ask'
+    /** 画质：lowest / medium / highest / ask（默认 medium 中等画质） */
+    quality?: 'lowest' | 'medium' | 'highest' | 'ask'
     /** 直接指定 yt-dlp 格式选择器或 format_id（优先于 quality） */
     format?: string
     /** 同时保存封面 */
@@ -55,8 +55,10 @@ export interface DownloadResult {
 }
 
 /** yt-dlp 格式选择器映射 */
-function qualityToFormat(quality: 'lowest' | 'highest'): string {
-    return quality === 'lowest' ? 'wv*+wa/w' : 'bv*+ba/b'
+function qualityToFormat(quality: 'lowest' | 'medium' | 'highest'): string {
+    if (quality === 'lowest') return 'wv*+wa/w'
+    if (quality === 'medium') return 'bv*[height<=720]+ba/b[height<=720]/bv*+ba/b' // ≤720p 最佳，无中档时退回最佳
+    return 'bv*+ba/b'
 }
 
 /** 条目发布时间（Unix 秒）：优先 timestamp，回退 upload_date(YYYYMMDD)；多P 嵌套取内层 */
@@ -72,25 +74,28 @@ function entryTimestamp(e: YtDlpInfo): number | null {
     return null
 }
 
-async function resolveQuality(options: DownloadOptions): Promise<'lowest' | 'highest'> {
+/** 解析画质：音频模式自动最低；未指定默认中等；显式 ask 才交互询问 */
+async function resolveQuality(options: DownloadOptions): Promise<'lowest' | 'medium' | 'highest'> {
     // 音频模式只需要最低画质视频流（引擎随后提取音频）
     if (options.type === 'audio') {
         if (!options.json) console.log('[画质] 音频模式，自动最低画质')
         return 'lowest'
     }
-    if (options.quality === 'lowest' || options.quality === 'highest') return options.quality
+    if (options.quality === 'lowest' || options.quality === 'medium' || options.quality === 'highest') {
+        return options.quality
+    }
 
-    // ask 模式
+    // ask 模式（显式指定才询问）
     if (!process.stdin.isTTY) {
-        if (!options.json) console.log('[画质] 非交互环境，默认最高画质')
-        return 'highest'
+        if (!options.json) console.log('[画质] 非交互环境，默认中等画质')
+        return 'medium'
     }
     const rl = createInterface({ input: process.stdin, output: process.stdout })
     return new Promise((resolve) => {
-        rl.question('\n[画质] 选择视频画质:\n  [1] 最高画质（默认）\n  [2] 最低画质（仅需文字稿/音频时推荐）\n请输入 (1/2): ', (answer) => {
+        rl.question('\n[画质] 选择视频画质:\n  [1] 中等画质（默认，≤720p）\n  [2] 最高画质\n  [3] 最低画质（仅需文字稿/音频时推荐）\n请输入 (1/2/3): ', (answer) => {
             rl.close()
-            const q = answer.trim() === '2' ? 'lowest' : 'highest'
-            if (!options.json) console.log(`[画质] 已选择：${q === 'lowest' ? '最低' : '最高'}\n`)
+            const q = answer.trim() === '2' ? 'highest' : (answer.trim() === '3' ? 'lowest' : 'medium')
+            if (!options.json) console.log(`[画质] 已选择：${q === 'lowest' ? '最低' : q === 'highest' ? '最高' : '中等'}\n`)
             resolve(q)
         })
     })

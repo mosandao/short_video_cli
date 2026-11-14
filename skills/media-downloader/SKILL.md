@@ -73,7 +73,7 @@ node dist/index.js status              # 环境自检
 | `--since <time>` | 发布时间范围起点（时间范围即选择器，免 --items） | - |
 | `--until <time>` | 发布时间范围终点（默认当前时刻） | - |
 | `--all` | 列表全部下载 | - |
-| `--quality` | lowest / highest / ask | ask（非交互环境=highest） |
+| `--quality` | lowest / medium / highest / ask | **medium（中等画质）**；音频模式自动 lowest |
 | `--format <id>` | 直接指定 yt-dlp 格式（parse 结果里的 format_id） | - |
 | `--save-cover` | 同时保存封面 | - |
 | `--browser` | 强制浏览器模式（抖音已自动路由，此标志用于其他平台兜底） | - |
@@ -81,6 +81,17 @@ node dist/index.js status              # 环境自检
 | `--json` | JSON 输出（进度走 stderr，stdout 恰好一个 JSON） | - |
 
 **安全设计**：链接包含多个条目且未指定 `--items/--part/--all` 时，命令会**拒绝下载并列出条目**，而不是整包下载。这是刻意行为（防止误下整个主页/合集）。
+
+## 画质策略（AI 必读）
+
+| 用户意图 | 应使用的命令 | 效果 |
+|----------|-------------|------|
+| 未提及画质（一般观看/存档） | **不加 `--quality`** | 自动**中等画质**（抖音 720p 档 / 引擎平台 ≤720p 最佳档） |
+| 明确只要**音频或文字稿**（转录、ASR、听内容） | **`--quality lowest`**（纯音频用 `--type audio`） | 最低画质视频流/直接音频——ASR 只需音轨，省带宽和时间 |
+| 要**高清**（收藏、剪辑素材、画质敏感） | `--quality highest` | 平台最高档（抖音 1080p 直选 / B站按账号权益） |
+| 指定具体分辨率/format_id | `--format <id>`（先 parse 查格式表） | 精确控制 |
+
+判断规则：用户目标含"转录/文字稿/听/只要音频/提取音频"字样 → 一律 lowest；"高清/最高画质/原画/收藏" → highest；其余情况**保持默认不加参数**。批量下载给转录用时，整批都加 `--quality lowest`。
 
 ## 标准工作流
 

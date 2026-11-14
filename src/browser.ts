@@ -369,7 +369,7 @@ export async function parseDouyinUserHomepageWithBrowser(
  * 移动端 API (iesdouyin.com) 返回 "encrypt_data_miss"，
  * 分享页面也不再内嵌视频 URL — 唯一可靠方式是通过浏览器 CDP 拦截。
  */
-export async function parseDouyinVideoWithBrowser(videoUrl: string, quality?: 'lowest' | 'highest'): Promise<ParserResult> {
+export async function parseDouyinVideoWithBrowser(videoUrl: string, quality?: 'lowest' | 'medium' | 'highest'): Promise<ParserResult> {
     if (!await isPuppeteerAvailable()) {
         return {
             success: false,
@@ -545,11 +545,19 @@ export async function parseDouyinVideoWithBrowser(videoUrl: string, quality?: 'l
         if (quality === 'lowest' && lowestQualityUrl) {
             finalVideoUrl = lowestQualityUrl
         } else if (quality !== 'lowest' && bitRateOptions.length > 0) {
-            const best = [...bitRateOptions].sort((a, b) => b.bit_rate - a.bit_rate)[0]
-            finalVideoUrl = best.url
+            const desc = [...bitRateOptions].sort((a, b) => b.bit_rate - a.bit_rate)
+            let picked = desc[0]
+            let label = '最高画质(API直选)'
+            if (quality === 'medium') {
+                // 中等档：优先 720p 档（gear 名含 720，取其中码率最高）；无则取列表中位
+                const gears720 = desc.filter(b => String(b.gear_name).includes('720'))
+                picked = gears720.length > 0 ? gears720[0] : desc[Math.floor((desc.length - 1) / 2)]
+                label = '中等画质(API直选)'
+            }
+            finalVideoUrl = picked.url
             // 回退链：播放器实际加载的流（必有音轨）→ 默认合成流
             fallbackVideoUrl = capturedVideoUrl || defaultPlayAddr || null
-            console.log(`[浏览器] 最高画质(API直选): ${best.gear_name} (${(best.bit_rate/1000).toFixed(0)}kbps)${fallbackVideoUrl ? '（无音轨时自动回退）' : ''}`)
+            console.log(`[浏览器] ${label}: ${picked.gear_name} (${(picked.bit_rate/1000).toFixed(0)}kbps)${fallbackVideoUrl ? '（无音轨时自动回退）' : ''}`)
         } else {
             finalVideoUrl = capturedVideoUrl
         }

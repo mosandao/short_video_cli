@@ -35,7 +35,7 @@ program
     .option('-i, --items <items>', '列表条目选择，如 "1,3-5"')
     .option('--all', '下载列表全部条目')
     .option('-p, --part <num>', '单个分P/条目序号（--items N 的简写）')
-    .option('--quality <quality>', '画质: lowest, highest, ask (默认: ask；音频模式自动最低)', 'ask')
+    .option('--quality <quality>', '画质: lowest, medium, highest, ask (默认: medium 中等画质；音频模式自动最低)', 'medium')
     .option('--since <time>', '发布时间范围起点: 2026-11-13[ 09:00] / yesterday[ 09:00] / today / 7d')
     .option('--until <time>', '发布时间范围终点（同上，默认当前时刻）')
     .option('--format <format>', 'yt-dlp 格式选择器或 format_id（优先于 --quality）')

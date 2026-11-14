@@ -271,7 +271,11 @@ export async function withHeadlessFallback<T extends { success: boolean; error?:
 
 export async function browserDownloadCommand(options: DownloadOptions): Promise<DownloadResult> {
     const { url, type, output } = options
-    const quality = type === 'audio' ? 'lowest' : (options.quality === 'lowest' ? 'lowest' : 'highest')
+    const quality: 'lowest' | 'medium' | 'highest' = type === 'audio'
+        ? 'lowest'
+        : (options.quality === 'lowest' || options.quality === 'medium' || options.quality === 'highest'
+            ? options.quality
+            : 'medium')
     const files: DownloadResult['files'] = []
 
     try {
