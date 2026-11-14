@@ -226,7 +226,8 @@ curl -s http://127.0.0.1:9222/json/version
 | `GALAXY_BROWSER_DEBUG_URL` | 专属登录浏览器调试地址 | http://127.0.0.1:9223 |
 | `GALAXY_BROWSER_EXECUTABLE` | 浏览器二进制路径 | 自动探测 Edge→Chrome |
 | `GALAXY_CHROME_DEBUG_URL` | --browser 连接的调试地址 | 专属实例或 9222 |
-| `GALAXY_LLM_API_KEY/MODEL/BASE_URL` | 润色 LLM（优先于 .env） | - |
+| `ZAI_CODING_CN_API_KEY` | 润色 LLM 的 bigmodel key（推荐，与 ~/.zshrc 全局变量同名，优先于 .env） | - |
+| `GALAXY_LLM_API_KEY/MODEL/BASE_URL` | 润色 LLM 覆盖（优先于 .env） | - |
 
 LLM 配置放根目录 `.env`（参照 `.env.example`）。
 

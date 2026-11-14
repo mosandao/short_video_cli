@@ -49,6 +49,7 @@ export function loadLlmConfig(): LlmConfig {
 
     const apiKey =
         process.env.GALAXY_LLM_API_KEY ||
+        process.env.ZAI_CODING_CN_API_KEY ||
         process.env.LLM_API_KEY ||
         env.api_key ||
         env.API_KEY ||
