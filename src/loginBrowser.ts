@@ -10,7 +10,7 @@
  * 可用 GALAXY_BROWSER_DEBUG_URL 覆盖；二进制可用 GALAXY_BROWSER_EXECUTABLE 指定。
  */
 
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -19,6 +19,46 @@ const PROJECT_ROOT = join(__dirname, '..')
 
 /** 持久化浏览器 profile 目录（gitignored） */
 export const PROFILE_DIR = join(PROJECT_ROOT, '.browser-data')
+
+/** 实例模式记录（login 可见 / 后台操作无头；后台操作见到可见实例会自动切回无头） */
+const MODE_FILE = join(PROFILE_DIR, '.svdl-mode')
+
+function writeMode(mode: 'visible' | 'headless'): void {
+    try {
+        mkdirSync(PROFILE_DIR, { recursive: true })
+        writeFileSync(MODE_FILE, mode)
+    } catch { /* 非关键 */ }
+}
+
+/** 上次拉起的实例模式（null = 无记录，视为未知） */
+export function currentBrowserMode(): 'visible' | 'headless' | null {
+    try {
+        const m = readFileSync(MODE_FILE, 'utf-8').trim()
+        return m === 'visible' || m === 'headless' ? m : null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * 切换运行中实例的模式：优雅关停当前实例 → 按目标模式重启。
+ * 用于后台操作把残留的可见实例归一化回无头（免打扰），或失败降级拉可见。
+ */
+export async function switchLoginBrowserMode(visible: boolean): Promise<void> {
+    try {
+        const puppeteer = (await import('puppeteer-core')).default
+        const browser = await puppeteer.connect({ browserURL: loginBrowserUrl(), defaultViewport: null, protocolTimeout: 15_000 })
+        const session = await (browser as any).target().createCDPSession()
+        await session.send('Browser.close').catch(() => {})
+        await browser.disconnect()
+    } catch { /* 已退出 */ }
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && await loginBrowserAlive()) {
+        await new Promise(r => setTimeout(r, 300))
+    }
+    await ensureLoginBrowser({ visible })
+    process.env.GALAXY_CHROME_DEBUG_URL = loginBrowserUrl()
+}
 
 /** 本实例调试地址（与用户自己的 9222 区分开） */
 export function loginBrowserUrl(): string {
@@ -130,6 +170,7 @@ export async function ensureLoginBrowser(opts: { visible?: boolean } = {}): Prom
     const deadline = Date.now() + 20_000
     while (Date.now() < deadline) {
         if (await loginBrowserAlive()) {
+            writeMode(opts.visible ? 'visible' : 'headless')
             return { url, mode: opts.visible ? 'persistent' : 'temporary', pid: child.pid ?? null }
         }
         await new Promise(r => setTimeout(r, 400))

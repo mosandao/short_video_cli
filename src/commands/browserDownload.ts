@@ -9,7 +9,7 @@ import { execSync } from 'child_process'
 import { unlinkSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import { parseDouyinUserHomepageWithBrowser, parseDouyinVideoWithBrowser } from '../browser.js'
-import { ensureLoginBrowser, loginBrowserAlive, loginBrowserUrl, profileExists } from '../loginBrowser.js'
+import { ensureLoginBrowser, loginBrowserAlive, loginBrowserUrl, profileExists, currentBrowserMode, switchLoginBrowserMode } from '../loginBrowser.js'
 import { isDouyinProfileUrl } from '../douyin.js'
 import { isLoggedInto, waitForLogin } from '../cookies.js'
 import { isAnonMode } from '../engine/driver.js'
@@ -220,6 +220,14 @@ export interface BrowserModeState {
 
 export async function ensureBrowserModeInstance(): Promise<BrowserModeState> {
     if (await loginBrowserAlive()) {
+        // 后台操作默认无头：可见/模式未知的残留实例（svdl login / 登录弹窗 / 旧版本留下的）
+        // 自动切回无头，免打扰；只有明确记录为 headless 的实例直接复用
+        if (currentBrowserMode() !== 'headless') {
+            console.log('[浏览器] 检测到可见/未知模式实例残留（登录流程留下），切回无头...')
+            await switchLoginBrowserMode(false)
+            console.log(`[浏览器] 已切换无头实例: ${loginBrowserUrl()}`)
+            return { mode: 'headless' }
+        }
         process.env.GALAXY_CHROME_DEBUG_URL = loginBrowserUrl()
         console.log(`[浏览器] 复用专属登录实例: ${loginBrowserUrl()}`)
         return { mode: 'reused' }
@@ -235,20 +243,7 @@ export async function ensureBrowserModeInstance(): Promise<BrowserModeState> {
 
 /** 关掉现有实例并以可见窗口重启（无头降级用） */
 export async function relaunchVisibleBrowser(): Promise<void> {
-    try {
-        const puppeteer = (await import('puppeteer-core')).default
-        const browser = await puppeteer.connect({ browserURL: loginBrowserUrl(), defaultViewport: null })
-        const session = await (browser as any).target().createCDPSession()
-        await session.send('Browser.close').catch(() => {})
-        await browser.disconnect()
-    } catch { /* 已退出 */ }
-    // 等真正退出再重启（避免 profile 锁竞态）
-    const deadline = Date.now() + 5000
-    while (Date.now() < deadline && await loginBrowserAlive()) {
-        await new Promise(r => setTimeout(r, 300))
-    }
-    await ensureLoginBrowser({ visible: true })
-    process.env.GALAXY_CHROME_DEBUG_URL = loginBrowserUrl()
+    await switchLoginBrowserMode(true)
     console.log(`[浏览器] 已切换可见窗口实例: ${loginBrowserUrl()}`)
 }
 
