@@ -44,7 +44,8 @@ async function autoScrollAndGetVideos(
     page: PuppeteerPage,
     maxVideos: number = 500,
     maxScrolls: number = 100,
-    _apiInfo?: ApiInfo
+    _apiInfo?: ApiInfo,
+    shouldStop?: () => boolean,
 ): Promise<string[]> {
     let allIds: Set<string> = new Set()
     let noNewDataCount = 0
@@ -80,7 +81,7 @@ async function autoScrollAndGetVideos(
     const cx = Math.floor(viewport.width / 2)
     const cy = Math.floor(viewport.height / 2)
 
-    while (scrollCount < maxScrolls && allIds.size < maxVideos) {
+    while (scrollCount < maxScrolls && allIds.size < maxVideos && !shouldStop?.()) {
         const currentCount = allIds.size
 
         try {
@@ -144,7 +145,15 @@ async function autoScrollAndGetVideos(
 /**
  * 使用浏览器解析抖音用户主页（支持无限滚动）
  */
-export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<ParserResult> {
+/**
+ * 解析抖音用户主页。
+ * opts.stopTs：时间下界（Unix 秒）——主页除置顶外按时间倒序，遇到非置顶且
+ * 早于 stopTs 的视频即停止滚动（--since 的早停优化，不必加载全部视频）。
+ */
+export async function parseDouyinUserHomepageWithBrowser(
+    url: string,
+    opts: { stopTs?: number } = {},
+): Promise<ParserResult> {
     // 检查依赖是否可用
     if (!await isPuppeteerAvailable()) {
         return {
@@ -215,6 +224,9 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
         const collectedVideoIds: Set<string> = new Set()
         const videoDescMap: Map<string, string> = new Map()
         const videoTimeMap: Map<string, number> = new Map()
+        // 时间下界早停：置顶视频(is_top)不参与判断，其余按倒序一旦早于 stopTs 即停
+        let earlyStopped = false
+        const stopTs = opts.stopTs
 
         page.on('response', async (response: any) => {
             const url = response.url()
@@ -233,6 +245,11 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
                                 collectedVideoIds.add(id)
                                 if (item.desc) videoDescMap.set(id, item.desc)
                                 if (item.create_time) videoTimeMap.set(id, Number(item.create_time))
+                                if (stopTs && !earlyStopped && item.create_time && !item.is_top
+                                    && Number(item.create_time) < stopTs) {
+                                    earlyStopped = true
+                                    console.log(`[浏览器] 遇到早于时间下界的视频，停止加载（已收集 ${collectedVideoIds.size} 个）`)
+                                }
                             }
                         }
                         console.log(`[浏览器] 已收集 ${collectedVideoIds.size} 个视频 ID`)
@@ -279,8 +296,8 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
             // 可能页面结构不同，继续尝试提取
         }
 
-        // 自动滚动加载全部视频
-        await autoScrollAndGetVideos(page, 500, 50)
+        // 自动滚动加载视频（stopTs 存在时滚动到时间下界即提前停止）
+        await autoScrollAndGetVideos(page, 500, 50, undefined, () => earlyStopped)
 
         // 以 API 响应中收集到的视频为准（有标题描述），DOM 仅用于触发滚动
         const videoIds = Array.from(collectedVideoIds)
@@ -289,7 +306,7 @@ export async function parseDouyinUserHomepageWithBrowser(url: string): Promise<P
         console.log('[浏览器] 断开连接（保留现有浏览器）')
         await browser.disconnect()
 
-        console.log(`[浏览器] 总计找到 ${videoIds.length} 个视频`)
+        console.log(`[浏览器] 总计找到 ${videoIds.length} 个视频${earlyStopped ? '（已到时间下界，提前停止）' : ''}`)
 
         // 添加说明：如果视频数量少于预期，说明分页被反爬机制阻止
         if (videoIds.length < 50 && hasMoreData) {

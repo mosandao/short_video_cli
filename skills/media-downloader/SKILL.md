@@ -158,7 +158,7 @@ node dist/index.js "<user-url>" --since "7d" --folder "作者"          # 最近
 node dist/index.js "<space-url>" --since "2026-11-01" --until "2026-11-13 23:59" --folder "作者"
 ```
 
-**时间格式**：`YYYY-MM-DD`、`YYYY-MM-DD HH:mm`、`yesterday [HH:mm]`、`today [HH:mm]`、`Nd`（N 天前 00:00）、`3天前`；`--until` 缺省为当前时刻。B站空间含失效视频时自动逐条取日期（跳过死链，稍慢）；引擎侧单次最多扫描 100 条。
+**时间格式**：`YYYY-MM-DD`、`YYYY-MM-DD HH:mm`、`yesterday [HH:mm]`、`today [HH:mm]`、`Nd`（N 天前 00:00）、`3天前`；`--until` 缺省为当前时刻。**抖音主页带时间范围时自动早停**——除置顶外按时间倒序，滚动到低于下界即停（实测 403 个视频的页只加载 21 个）；B站空间含失效视频时自动逐条取日期（跳过死链，稍慢），引擎侧单次最多扫描 100 条。
 
 - **登录后默认无头运行**（实测登录态无头对抖音完全可用，无窗口打扰）；无头未成功时自动切可见窗口重试；`svdl login` 时才弹可见窗口
 - **推荐先 `svdl login douyin.com`**：登录后画质档更全（实测多出 1080p）、主页枚举更稳、无头可用

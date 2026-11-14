@@ -265,15 +265,7 @@ export async function browserDownloadCommand(options: DownloadOptions): Promise<
 
         // 用户主页 → 枚举视频列表
         if (isDouyinProfileUrl(url)) {
-            const homepage = await withHeadlessFallback(bm.mode, () => parseDouyinUserHomepageWithBrowser(url))
-            if (!homepage.success || !homepage.data) {
-                return { success: false, files: [], error: homepage.error || '主页解析失败' }
-            }
-            const pages = homepage.data.pages || []
-            const dated = pages.filter(p => p.createTime !== undefined)
-            console.log(`\n[列表] 共 ${pages.length} 个视频${dated.length ? '' : '（⚠️ 未捕获发布时间，无法用时间范围过滤）'}`)
-
-            // 时间范围（--since/--until）→ 直接作为条目选择器
+            // 时间范围：解析于枚举前（早停下界传给滚动循环，置顶除外按时间倒序，到界即停）
             let range: TimeRange | null = null
             if (options.since || options.until) {
                 const r = parseTimeRange(options.since, options.until)
@@ -282,6 +274,17 @@ export async function browserDownloadCommand(options: DownloadOptions): Promise<
                 }
                 range = r
             }
+            // 有 since 用 since 作下界；只给 until 用 until（降序列表一旦低于 until，其后全在范围外）
+            const stopTs = range ? (options.since ? range.sinceTs : range.untilTs) : undefined
+
+            const homepage = await withHeadlessFallback(bm.mode,
+                () => parseDouyinUserHomepageWithBrowser(url, stopTs !== undefined ? { stopTs } : {}))
+            if (!homepage.success || !homepage.data) {
+                return { success: false, files: [], error: homepage.error || '主页解析失败' }
+            }
+            const pages = homepage.data.pages || []
+            const dated = pages.filter(p => p.createTime !== undefined)
+            console.log(`\n[列表] 共 ${pages.length} 个视频${dated.length ? '' : '（⚠️ 未捕获发布时间，无法用时间范围过滤）'}`)
 
             let selected: PageInfo[]
             if (range) {
