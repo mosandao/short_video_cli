@@ -13,7 +13,7 @@ import { downloadMedia, extractInfo, extractInfoResolved, makeProgressPrinter } 
 import type { YtDlpInfo } from '../engine/types.js'
 import { insertRecord, queryByVideoUrl } from '../db.js'
 import { formatBytes, formatDuration } from '../utils/format.js'
-import { isDouyinUrl, resolveDouyinShareLink, cleanDouyinUserUrl } from '../douyin.js'
+import { isDouyinUrl, resolveDouyinShareLink, canonicalizeDouyinUrl } from '../douyin.js'
 import { parseTimeRange, formatTimePoint, type TimeRange } from '../timeRange.js'
 import { browserDownloadCommand } from './browserDownload.js'
 
@@ -163,16 +163,11 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
     // 抖音系链接（视频/主页/分享短链）→ 自动浏览器模式：
     // yt-dlp 抖音 extractor 未实现 a_bogus 签名，引擎路径不可用，无需用户手动 --browser
     if (isDouyinUrl(url)) {
-        let targetUrl = await resolveDouyinShareLink(url)
+        // 短链解析 + 规范化（vid/modal_id 弹层参数 → /video/<id>；主页剥参数）
+        let targetUrl = canonicalizeDouyinUrl(await resolveDouyinShareLink(url))
         if (!options.json && targetUrl !== url) {
-            console.log(`[短链] ${url} → ${targetUrl}`)
+            console.log(`[规范化] ${url} → ${targetUrl}`)
         }
-        // 主页链接清洗 ?vid= 等跳转参数（会打开视频弹层干扰滚动枚举）
-        const cleanedUrl = cleanDouyinUserUrl(targetUrl)
-        if (!options.json && cleanedUrl !== targetUrl) {
-            console.log(`[主页] 清洗跳转参数 → ${cleanedUrl}`)
-        }
-        targetUrl = cleanedUrl
         if (!options.json) {
             console.log('[模式] 抖音链接自动走浏览器模式（引擎签名限制）')
         }

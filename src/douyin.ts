@@ -50,6 +50,30 @@ export function cleanDouyinUserUrl(url: string): string {
 }
 
 /**
+ * 抖音链接规范化（统一入口）：
+ * - 带 vid 或 modal_id 参数（视频弹层跳转链接）→ /video/<id>
+ *   实测 modal 弹层 URL 解析只能拿到页面兜底标题，规范化后确定性命中视频
+ * - /user/ 主页链接 → 剥掉全部查询参数
+ * - 其余原样返回
+ */
+export function canonicalizeDouyinUrl(url: string): string {
+    try {
+        const u = new URL(url)
+        if (!/(^|\.)douyin\.com$/.test(u.hostname.toLowerCase())) return url
+        const vid = u.searchParams.get('vid') || u.searchParams.get('modal_id')
+        if (vid && /^\d+$/.test(vid)) {
+            return `https://www.douyin.com/video/${vid}`
+        }
+        if (u.pathname.startsWith('/user/')) {
+            return `https://www.douyin.com${u.pathname}`
+        }
+        return url
+    } catch {
+        return url
+    }
+}
+
+/**
  * 解析分享短链得到最终 URL（HEAD 跟随重定向；抖音对 HEAD 不友好时回退 GET）。
  * 失败时原样返回，由浏览器导航时自然完成跳转。
  */

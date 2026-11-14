@@ -157,7 +157,10 @@ transcripts/用户名/视频标题.txt
 
 ## 抖音（自动浏览器模式，无需 --browser）
 
-抖音链接（视频 `douyin.com/video/...`、主页 `douyin.com/user/...`、分享短链 `v.douyin.com/...`）**自动路由到浏览器模式**——引擎的抖音 extractor 未实现签名（上游限制），CLI 已内置路由，直接用即可。**带 `?from_tab_name=main&vid=...` 跳转参数的主页链接**（从视频页"进入主页"复制的那种）会自动清洗参数后按主页处理，无需手工去 URL：
+抖音链接（视频 `douyin.com/video/...`、主页 `douyin.com/user/...`、分享短链 `v.douyin.com/...`）**自动路由到浏览器模式**——引擎的抖音 extractor 未实现签名（上游限制），CLI 已内置路由，直接用即可。**所有带参数的跳转链接自动规范化**，无需手工处理 URL：
+
+- 带 `vid=` 或 `modal_id=`（视频弹层跳转，如从主页/分享点进来的）→ 规范化为 `/video/<id>`——modal 弹层 URL 直接解析只能拿到页面兜底标题，规范化后确定性命中视频
+- 主页带 `from_tab_name=` 等参数 → 剥掉参数，避免弹层盖住主页网格干扰滚动枚举
 
 ```bash
 node dist/index.js parse "<url>"              # 单视频：标题+已捕获流；主页：全部视频列表（含发布时间）
