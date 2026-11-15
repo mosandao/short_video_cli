@@ -112,7 +112,7 @@ node dist/index.js history -p douyin    # 按平台筛
 node dist/index.js history -n 50
 ```
 
-- 下载前按 URL 去重：已下载且**本地文件仍在** → 跳过（文件被删会重新下载）
+- 下载前去重（单视频与列表批量都逐条生效）：URL 已下载且**本地文件仍在** → 跳过；批量按**条目真实 URL** 判断（索引偏移不失配），重复跑不产生重复记录；文件被删或请求类型不符（已有视频 vs 本次要音频）会自动重下
 - `transcribe` 完成后自动回写 `transcript_text` 字段
 
 ## 转录流水线（transcribe）

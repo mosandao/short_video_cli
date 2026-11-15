@@ -11,7 +11,7 @@ import { basename } from 'path'
 import { createInterface } from 'readline'
 import { downloadMedia, extractInfo, extractInfoResolved, makeProgressPrinter } from '../engine/driver.js'
 import type { YtDlpInfo } from '../engine/types.js'
-import { insertRecord, queryByVideoUrl } from '../db.js'
+import { insertRecord, queryByVideoUrl, queryByMediaPath, touchRecord, updateVideoUrl } from '../db.js'
 import { formatBytes, formatDuration } from '../utils/format.js'
 import { isDouyinUrl, resolveDouyinShareLink, canonicalizeDouyinUrl } from '../douyin.js'
 import { parseTimeRange, formatTimePoint, type TimeRange } from '../timeRange.js'
@@ -108,13 +108,48 @@ function normalizeUploadDate(info: YtDlpInfo): string {
     return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d
 }
 
-/** 已下载去重：URL 命中且本地文件仍在 → 跳过（修复旧版"文件已删仍跳过"的陷阱） */
-function alreadyDownloaded(url: string): { dbId: number; mediaPath: string } | null {
+/** 音频文件扩展名（判断已有记录与本次请求类型是否一致） */
+const AUDIO_EXTS = /\.(m4a|mp3|wav|flac|ogg|aac)$/i
+
+/** 已有文件与本次请求类型是否一致（请求音频但命中视频文件时不跳过，正常重下） */
+function matchesRequestedType(path: string, audioOnly: boolean): boolean {
+    return audioOnly ? AUDIO_EXTS.test(path) : !AUDIO_EXTS.test(path)
+}
+
+/** 已下载去重：URL 命中、本地文件仍在且类型一致 → 跳过（文件被删/类型不符会重下） */
+function alreadyDownloaded(url: string, audioOnly = false): { dbId: number; mediaPath: string } | null {
     const record = queryByVideoUrl(url)
-    if (record?.mediaPath && existsSync(record.mediaPath)) {
+    if (record?.mediaPath && existsSync(record.mediaPath) && matchesRequestedType(record.mediaPath, audioOnly)) {
         return { dbId: record.id, mediaPath: record.mediaPath }
     }
     return null
+}
+
+/** 条目真实视频地址（flat 条目的 url/webpage_url；作为跨次运行稳定的去重键，不受索引偏移影响） */
+function entryRealUrl(e: YtDlpInfo | null | undefined): string | undefined {
+    const u = e?.webpage_url || e?.url
+    return typeof u === 'string' && /^https?:\/\//.test(u) ? u : undefined
+}
+
+/** 旧版列表条目的合成 URL（?items=<idx> 后缀；用于兼容历史记录去重） */
+function syntheticEntryUrl(canonicalUrl: string, idx: number): string {
+    return `${canonicalUrl}${canonicalUrl.includes('?') ? '&' : '?'}items=${idx}`
+}
+
+/** 解析 playlist_items 索引串 "1,3-5" → 升序索引数组；undefined → 全部 1..count */
+function parseEntryIndices(entry: string | undefined, count: number): number[] {
+    if (entry === undefined) return Array.from({ length: count }, (_, i) => i + 1)
+    const out: number[] = []
+    for (const token of entry.split(',')) {
+        const m = /^(\d+)-(\d+)$/.exec(token.trim())
+        if (m) {
+            for (let n = +m[1]; n <= +m[2]; n++) out.push(n)
+        } else {
+            const n = parseInt(token, 10)
+            if (Number.isFinite(n) && n > 0) out.push(n)
+        }
+    }
+    return out.sort((a, b) => a - b)
 }
 
 function recordToDb(params: {
@@ -127,6 +162,16 @@ function recordToDb(params: {
     quiet?: boolean
 }): number {
     try {
+        // 同一物理文件路径（引擎"文件已存在跳过"后的重复落库、删后重下回原位、
+        // 旧记录合成 URL 索引偏移失配等场景）→ 复用原行，不插重复行；
+        // 旧 video_url 是合成地址时顺带升级为本次的（真实）地址
+        const dup = queryByMediaPath(params.mediaPath)
+        if (dup) {
+            touchRecord(dup.id)
+            if (dup.videoUrl !== params.videoUrl) updateVideoUrl(dup.id, params.videoUrl)
+            if (!params.quiet) console.log(`  [记录] 已存在，复用记录 (ID: ${dup.id})`)
+            return dup.id
+        }
         const record = insertRecord({
             platform: params.platform,
             username: params.username,
@@ -300,7 +345,7 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
         // 去重（单视频场景）
         const canonicalUrl = String(info.webpage_url || info.original_url || url)
         if (!isPlaylist) {
-            const existed = alreadyDownloaded(canonicalUrl)
+            const existed = alreadyDownloaded(canonicalUrl, audioOnly)
             if (existed) {
                 if (!options.json) console.log(`\n[跳过] 已下载过: ${existed.mediaPath}`)
                 return {
@@ -324,6 +369,55 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
             console.log(`[标题] ${title}`)
             console.log(`[平台] ${platform}${username ? ` / ${username}` : ''}`)
         }
+
+        // 列表逐条去重：条目真实 URL（新记录）或合成 items URL（旧记录）命中且文件仍在 → 剔除该条，
+        // 避免重复下载与重复 DB 行；文件被删的记录不命中，会正常重下
+        const batchSkipped: Array<{ idx: number; dbId: number; mediaPath: string; title: string }> = []
+        if (isPlaylist) {
+            const indices = parseEntryIndices(entry, entries.length)
+            const remaining: number[] = []
+            for (const n of indices) {
+                const e = entries[n - 1]
+                if (!e) {
+                    remaining.push(n) // 越界索引交给引擎报错
+                    continue
+                }
+                let hit: { dbId: number; mediaPath: string } | null = null
+                const realUrl = entryRealUrl(e)
+                if (realUrl) hit = alreadyDownloaded(realUrl, audioOnly)
+                if (!hit) hit = alreadyDownloaded(syntheticEntryUrl(canonicalUrl, n), audioOnly)
+                if (hit) {
+                    batchSkipped.push({ idx: n, dbId: hit.dbId, mediaPath: hit.mediaPath, title: String(e.title || e.id || '') })
+                } else {
+                    remaining.push(n)
+                }
+            }
+            if (batchSkipped.length && !options.json) {
+                console.log(`\n[去重] ${batchSkipped.length}/${indices.length} 个条目已下载且文件仍在，跳过:`)
+                batchSkipped.slice(0, 20).forEach(s => console.log(`  [${s.idx}] ${s.title || s.mediaPath}`))
+                if (batchSkipped.length > 20) console.log(`  ... 还有 ${batchSkipped.length - 20} 条`)
+            }
+            if (!remaining.length) {
+                if (!options.json) console.log('[去重] 全部条目均已下载，无需重复下载')
+                return {
+                    success: true,
+                    files: batchSkipped.map(s => ({
+                        path: s.mediaPath,
+                        size: fileSize(s.mediaPath),
+                        type: (audioOnly ? 'audio' : 'video') as 'audio' | 'video',
+                        title: s.title,
+                        platform,
+                        dbId: s.dbId,
+                    })),
+                }
+            }
+            if (batchSkipped.length) entry = remaining.join(',')
+        }
+
+        // 逐条关联索引（升序，与引擎 playlist_items 输出顺序一致；供落库取条目 URL/标题/发布时间）
+        const downloadIndices = entry
+            ? entry.split(',').map(t => parseInt(t, 10)).filter(n => Number.isFinite(n) && n > 0)
+            : []
 
         // 第二步：引擎下载
         const result = await downloadMedia({
@@ -360,13 +454,13 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
                     quiet: options.json,
                 })
             } else {
-                const entryUrl = entry
-                    ? `${canonicalUrl}${canonicalUrl.includes('?') ? '&' : '?'}items=${entry}`
-                    : canonicalUrl
-                // 按选择顺序回查条目发布时间（entry 为 "5,12,19" 形式的单索引串）
-                const selectedEntry = entry
-                    ? (entries[parseInt(entry.split(',')[i] ?? '', 10) - 1] ?? null)
-                    : null
+                // 按下载顺序关联条目（downloadIndices 升序，与引擎输出一致）；
+                // videoUrl 优先记录条目真实地址（跨次去重键，索引偏移也不失配），无则退回合成 items URL
+                const idx = downloadIndices[i]
+                const selectedEntry = idx ? (entries[idx - 1] ?? null) : null
+                const realUrl = entryRealUrl(selectedEntry)
+                const entryUrl = realUrl
+                    || (idx ? syntheticEntryUrl(canonicalUrl, idx) : canonicalUrl)
                 const entryTs = selectedEntry ? entryTimestamp(selectedEntry) : null
                 dbId = recordToDb({
                     platform,
@@ -395,7 +489,16 @@ export async function downloadCommand(options: DownloadOptions): Promise<Downloa
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
         }
 
-        return { success: true, files: dbFiles }
+        // 跳过的已下载条目一并返回（调用方拿到的仍是完整产出集）
+        const skippedFiles = batchSkipped.map(s => ({
+            path: s.mediaPath,
+            size: fileSize(s.mediaPath),
+            type: (audioOnly ? 'audio' : 'video') as 'audio' | 'video',
+            title: s.title,
+            platform,
+            dbId: s.dbId,
+        }))
+        return { success: true, files: [...skippedFiles, ...dbFiles] }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (!options.json) console.error(`\n[错误] ${message}\n`)

@@ -126,6 +126,25 @@ export function queryByVideoUrl(videoUrl: string): MediaRecord | null {
     return result.length > 0 ? rowToRecord(result[0]) : null
 }
 
+export function queryByMediaPath(mediaPath: string): MediaRecord | null {
+    const d = getDb()
+    const rows = d.prepare('SELECT * FROM media WHERE media_path = ? LIMIT 1').all(mediaPath)
+    const result = rows as any[]
+    return result.length > 0 ? rowToRecord(result[0]) : null
+}
+
+/** 刷新下载时间（重复命中时复用原记录，不插重复行） */
+export function touchRecord(id: number): void {
+    const d = getDb()
+    d.prepare("UPDATE media SET downloaded_at = datetime('now', 'localtime') WHERE id = ?").run(id)
+}
+
+/** 修正去重键（旧记录的合成 items URL 升级为条目真实地址） */
+export function updateVideoUrl(id: number, videoUrl: string): void {
+    const d = getDb()
+    d.prepare('UPDATE media SET video_url = ? WHERE id = ?').run(videoUrl, id)
+}
+
 export function queryByTitleExact(title: string): MediaRecord | null {
     const d = getDb()
     const rows = d.prepare('SELECT * FROM media WHERE title = ? ORDER BY downloaded_at DESC LIMIT 1').all(title)
